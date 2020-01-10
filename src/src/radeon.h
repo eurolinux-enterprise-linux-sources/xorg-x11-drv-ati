@@ -135,7 +135,7 @@
 #endif
 
 typedef enum {
-    OPTION_NOACCEL,
+    OPTION_ACCEL,
     OPTION_SW_CURSOR,
     OPTION_PAGE_FLIP,
     OPTION_EXA_PIXMAPS,
@@ -148,7 +148,8 @@ typedef enum {
     OPTION_ACCELMETHOD,
     OPTION_EXA_VSYNC,
     OPTION_ZAPHOD_HEADS,
-    OPTION_SWAPBUFFERS_WAIT
+    OPTION_SWAPBUFFERS_WAIT,
+    OPTION_DELETE_DP12,
 } RADEONOpts;
 
 
@@ -419,7 +420,6 @@ typedef struct {
 
     Bool              directRenderingEnabled;
     struct radeon_dri2  dri2;
-    Bool              accelDFS;
 
     /* accel */
     Bool              RenderAccel; /* Render */
@@ -820,5 +820,7 @@ RADEONLog2(int val)
 #endif
 }
 
+#define RADEON_TILING_MASK				0xff
+#define RADEON_TILING_LINEAR				0x0
 
 #endif /* _RADEON_H_ */

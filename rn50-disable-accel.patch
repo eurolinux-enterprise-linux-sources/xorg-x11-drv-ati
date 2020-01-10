@@ -1,0 +1,15 @@
+diff --git a/src/radeon_kms.c b/src/radeon_kms.c
+index 62364d9..b609609 100644
+--- a/src/radeon_kms.c
++++ b/src/radeon_kms.c
+@@ -491,7 +491,9 @@ static Bool RADEONPreInitAccel_KMS(ScrnInfoPtr pScrn)
+     }
+ 
+     if (!xf86ReturnOptValBool(info->Options, OPTION_ACCEL, TRUE) ||
+-	(!RADEONIsAccelWorking(pScrn))) {
++	(!RADEONIsAccelWorking(pScrn)) ||
++	info->Chipset == PCI_CHIP_RN50_515E ||
++        info->Chipset == PCI_CHIP_RN50_5969) {
+ 	xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+ 		   "GPU accel disabled or not working, using shadowfb for KMS\n");
+ shadowfb:

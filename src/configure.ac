@@ -23,7 +23,7 @@
 # Initialize Autoconf
 AC_PREREQ([2.60])
 AC_INIT([xf86-video-ati],
-        [7.3.99],
+        [7.5.99],
         [https://bugs.freedesktop.org/enter_bug.cgi?product=xorg],
         [xf86-video-ati])
 
@@ -71,7 +71,7 @@ XORG_DRIVER_CHECK_EXT(XV, videoproto)
 XORG_DRIVER_CHECK_EXT(DPMSExtension, xextproto)
 
 # Checks for libraries.
-PKG_CHECK_MODULES(LIBDRM, [libdrm >= 2.4.51])
+PKG_CHECK_MODULES(LIBDRM, [libdrm >= 2.4.58])
 PKG_CHECK_MODULES(LIBDRM_RADEON, [libdrm_radeon])
 
 # Obtain compiler/linker options for the driver dependencies
@@ -106,12 +106,13 @@ AC_ARG_ENABLE(glamor,
 	      [GLAMOR=yes])
 
 if test "x$GLAMOR" != "xno"; then
-	AC_CHECK_HEADERS([glamor.h], [GLAMOR_H="yes"], [GLAMOR_H="no"], [])
+	AC_CHECK_HEADERS([glamor.h], [GLAMOR_H="yes"], [GLAMOR_H="no"], [#include "xorg-server.h"])
 
 	if test "x$GLAMOR_H" = xyes; then
 		AC_CHECK_DECL(GLAMOR_NO_DRI3,
 			      [GLAMOR_XSERVER="yes"], [GLAMOR_XSERVER="no"],
-			      [#include "glamor.h"])
+			      [#include "xorg-server.h"
+			       #include "glamor.h"])
 	fi
 
 	if test "x$GLAMOR_XSERVER" != xyes; then

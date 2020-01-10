@@ -59,7 +59,7 @@ extern SymTabRec RADEONChipsets[];
 static Bool radeon_setup_kernel_mem(ScreenPtr pScreen);
 
 const OptionInfoRec RADEONOptions_KMS[] = {
-    { OPTION_NOACCEL,        "NoAccel",          OPTV_BOOLEAN, {0}, FALSE },
+    { OPTION_ACCEL,          "Accel",            OPTV_BOOLEAN, {0}, FALSE },
     { OPTION_SW_CURSOR,      "SWcursor",         OPTV_BOOLEAN, {0}, FALSE },
     { OPTION_PAGE_FLIP,      "EnablePageFlip",   OPTV_BOOLEAN, {0}, FALSE },
     { OPTION_COLOR_TILING,   "ColorTiling",      OPTV_BOOLEAN, {0}, FALSE },
@@ -72,8 +72,8 @@ const OptionInfoRec RADEONOptions_KMS[] = {
     { OPTION_EXA_VSYNC,      "EXAVSync",         OPTV_BOOLEAN, {0}, FALSE },
     { OPTION_EXA_PIXMAPS,    "EXAPixmaps",	 OPTV_BOOLEAN,   {0}, FALSE },
     { OPTION_ZAPHOD_HEADS,   "ZaphodHeads",      OPTV_STRING,  {0}, FALSE },
-    { OPTION_PAGE_FLIP,      "EnablePageFlip",   OPTV_BOOLEAN, {0}, FALSE },
     { OPTION_SWAPBUFFERS_WAIT,"SwapbuffersWait", OPTV_BOOLEAN, {0}, FALSE },
+    { OPTION_DELETE_DP12,    "DeleteUnusedDP12Displays", OPTV_BOOLEAN, {0}, FALSE},
     { -1,                    NULL,               OPTV_NONE,    {0}, FALSE }
 };
 
@@ -212,6 +212,12 @@ radeonShadowWindow(ScreenPtr screen, CARD32 row, CARD32 offset, int mode,
     return ((uint8_t *)info->front_bo->ptr + row * stride + offset);
 }
 
+static void
+radeonUpdatePacked(ScreenPtr pScreen, shadowBufPtr pBuf)
+{
+    shadowUpdatePacked(pScreen, pBuf);
+}
+
 static Bool RADEONCreateScreenResources_KMS(ScreenPtr pScreen)
 {
     ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
@@ -232,7 +238,7 @@ static Bool RADEONCreateScreenResources_KMS(ScreenPtr pScreen)
     if (info->r600_shadow_fb) {
 	pixmap = pScreen->GetScreenPixmap(pScreen);
 
-	if (!shadowAdd(pScreen, pixmap, shadowUpdatePackedWeak(),
+	if (!shadowAdd(pScreen, pixmap, radeonUpdatePacked,
 		       radeonShadowWindow, 0, NULL))
 	    return FALSE;
     }
@@ -327,9 +333,6 @@ static Bool RADEONIsFastFBWorking(ScrnInfoPtr pScrn)
     int r;
     uint32_t tmp = 0;
 
-#ifndef RADEON_INFO_FASTFB_WORKING
-#define RADEON_INFO_FASTFB_WORKING 0x14
-#endif
     memset(&ginfo, 0, sizeof(ginfo));
     ginfo.request = RADEON_INFO_FASTFB_WORKING;
     ginfo.value = (uintptr_t)&tmp;
@@ -349,9 +352,6 @@ static Bool RADEONIsFusionGARTWorking(ScrnInfoPtr pScrn)
     int r;
     uint32_t tmp;
 
-#ifndef RADEON_INFO_FUSION_GART_WORKING
-#define RADEON_INFO_FUSION_GART_WORKING 0x0c
-#endif
     memset(&ginfo, 0, sizeof(ginfo));
     ginfo.request = RADEON_INFO_FUSION_GART_WORKING;
     ginfo.value = (uintptr_t)&tmp;
@@ -371,13 +371,6 @@ static Bool RADEONIsAccelWorking(ScrnInfoPtr pScrn)
     int r;
     uint32_t tmp;
 
-#ifndef RADEON_INFO_ACCEL_WORKING
-#define RADEON_INFO_ACCEL_WORKING 0x03
-#endif
-#ifndef RADEON_INFO_ACCEL_WORKING2
-#define RADEON_INFO_ACCEL_WORKING2 0x05
-#endif
-
     memset(&ginfo, 0, sizeof(ginfo));
     if (info->dri2.pKernelDRMVersion->version_minor >= 5)
 	ginfo.request = RADEON_INFO_ACCEL_WORKING2;
@@ -394,8 +387,12 @@ static Bool RADEONIsAccelWorking(ScrnInfoPtr pScrn)
         }
         return FALSE;
     }
-    if (tmp)
+    if (info->ChipFamily == CHIP_FAMILY_HAWAII) {
+        if (tmp == 2 || tmp == 3)
+            return TRUE;
+    } else if (tmp) {
         return TRUE;
+    }
     return FALSE;
 }
 
@@ -493,8 +490,7 @@ static Bool RADEONPreInitAccel_KMS(ScrnInfoPtr pScrn)
 	info->is_fast_fb = TRUE;
     }
 
-    if (xf86ReturnOptValBool(info->Options, OPTION_NOACCEL,
-			     info->ChipFamily == CHIP_FAMILY_HAWAII) ||
+    if (!xf86ReturnOptValBool(info->Options, OPTION_ACCEL, TRUE) ||
 	(!RADEONIsAccelWorking(pScrn))) {
 	xf86DrvMsg(pScrn->scrnIndex, X_INFO,
 		   "GPU accel disabled or not working, using shadowfb for KMS\n");
@@ -588,7 +584,9 @@ static Bool RADEONPreInitChipType_KMS(ScrnInfoPtr pScrn)
 static int radeon_get_drm_master_fd(ScrnInfoPtr pScrn)
 {
     RADEONInfoPtr  info   = RADEONPTR(pScrn);
+#ifdef XF86_PDEV_SERVER_FD
     RADEONEntPtr pRADEONEnt = RADEONEntPriv(pScrn);
+#endif
     struct pci_device *dev = info->PciInfo;
     char *busid;
     int fd;
@@ -673,10 +671,6 @@ static Bool r600_get_tile_config(ScrnInfoPtr pScrn)
 
     if (info->ChipFamily < CHIP_FAMILY_R600)
 	return FALSE;
-
-#ifndef RADEON_INFO_TILING_CONFIG
-#define RADEON_INFO_TILING_CONFIG 0x6
-#endif
 
     memset(&ginfo, 0, sizeof(ginfo));
     ginfo.request = RADEON_INFO_TILING_CONFIG;
@@ -785,10 +779,16 @@ static void RADEONSetupCapabilities(ScrnInfoPtr pScrn)
     pScrn->capabilities = 0;
     ret = drmGetCap(info->dri2.drm_fd, DRM_CAP_PRIME, &value);
     if (ret == 0) {
-	if (value & DRM_PRIME_CAP_EXPORT)
-	    pScrn->capabilities |= RR_Capability_SourceOutput | RR_Capability_SinkOffload;
-	if (value & DRM_PRIME_CAP_IMPORT)
-	    pScrn->capabilities |= RR_Capability_SourceOffload | RR_Capability_SinkOutput;
+	if (value & DRM_PRIME_CAP_EXPORT) {
+	    pScrn->capabilities |= RR_Capability_SourceOutput;
+	    if (!info->r600_shadow_fb && info->dri2.available)
+		pScrn->capabilities |= RR_Capability_SinkOffload;
+	}
+	if (value & DRM_PRIME_CAP_IMPORT) {
+	    pScrn->capabilities |= RR_Capability_SinkOutput;
+	    if (!info->r600_shadow_fb && info->dri2.available)
+		pScrn->capabilities |= RR_Capability_SourceOffload;
+	}
     }
 #endif
 }
@@ -889,13 +889,13 @@ Bool RADEONPreInit_KMS(ScrnInfoPtr pScrn, int flags)
 	     * with proper bit, in the meantime you need to set tiling option in
 	     * xorg configuration files
 	     */
-	    info->ChipFamily <= CHIP_FAMILY_HAWAII &&
+	    info->ChipFamily <= CHIP_FAMILY_MULLINS &&
 	    !info->is_fast_fb;
 
 	/* 2D color tiling */
 	if (info->ChipFamily >= CHIP_FAMILY_R600) {
 		info->allowColorTiling2D = xf86ReturnOptValBool(info->Options, OPTION_COLOR_TILING_2D,
-                                                                info->ChipFamily <= CHIP_FAMILY_HAWAII);
+                                                                info->ChipFamily <= CHIP_FAMILY_MULLINS);
 	}
 
 	if (info->ChipFamily >= CHIP_FAMILY_R600) {
@@ -938,12 +938,16 @@ Bool RADEONPreInit_KMS(ScrnInfoPtr pScrn, int flags)
     xf86DrvMsg(pScrn->scrnIndex, X_INFO,
 	       "SwapBuffers wait for vsync: %sabled\n", info->swapBuffersWait ? "en" : "dis");
 
+    if (xf86ReturnOptValBool(info->Options, OPTION_DELETE_DP12, FALSE)) {
+        info->drmmode.delete_dp_12_displays = TRUE;
+    }
+
     if (drmmode_pre_init(pScrn, &info->drmmode, pScrn->bitsPerPixel / 8) == FALSE) {
 	xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "Kernel modesetting setup failed\n");
 	goto fail;
     }
 
-    if (info->drmmode.mode_res->count_crtcs == 1)
+    if (info->drmmode.count_crtcs == 1)
         pRADEONEnt->HasCRTC2 = FALSE;
     else
         pRADEONEnt->HasCRTC2 = TRUE;
@@ -1124,7 +1128,9 @@ static Bool RADEONSaveScreen_KMS(ScreenPtr pScreen, int mode)
 static Bool radeon_set_drm_master(ScrnInfoPtr pScrn)
 {
     RADEONInfoPtr  info  = RADEONPTR(pScrn);
+#ifdef XF86_PDEV_SERVER_FD
     RADEONEntPtr pRADEONEnt = RADEONEntPriv(pScrn);
+#endif
     int err;
 
 #ifdef XF86_PDEV_SERVER_FD
@@ -1143,9 +1149,9 @@ static Bool radeon_set_drm_master(ScrnInfoPtr pScrn)
 static void radeon_drop_drm_master(ScrnInfoPtr pScrn)
 {
     RADEONInfoPtr  info  = RADEONPTR(pScrn);
+#ifdef XF86_PDEV_SERVER_FD
     RADEONEntPtr pRADEONEnt = RADEONEntPriv(pScrn);
 
-#ifdef XF86_PDEV_SERVER_FD
     if (pRADEONEnt->platform_dev &&
             (pRADEONEnt->platform_dev->flags & XF86_PDEV_SERVER_FD))
         return;
@@ -1213,7 +1219,7 @@ Bool RADEONScreenInit_KMS(SCREEN_INIT_ARGS_DECL)
     ScrnInfoPtr    pScrn = xf86ScreenToScrn(pScreen);
     RADEONInfoPtr  info  = RADEONPTR(pScrn);
     int            subPixelOrder = SubPixelUnknown;
-    char*          s;
+    const char *s;
     void *front_ptr;
 
     pScrn->fbOffset = 0;

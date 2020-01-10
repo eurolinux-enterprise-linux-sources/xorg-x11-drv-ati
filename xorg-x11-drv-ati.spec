@@ -1,13 +1,13 @@
 %define tarball xf86-video-ati
 %define moduledir %(pkg-config xorg-server --variable=moduledir )
 %define driverdir	%{moduledir}/drivers
-%define gitdate 20140505
-%define gitversion 06e3c8c
+%define gitdate 20150129
+%define gitversion c80ea1e
 
 Summary:   Xorg X11 ati video driver
 Name:      xorg-x11-drv-ati
-Version:   7.3.99
-Release:   2%{?dist}
+Version:   7.5.99
+Release:   3%{?dist}
 URL:       http://www.x.org
 License:   MIT
 Group:     User Interface/X Hardware Support
@@ -20,10 +20,13 @@ Source0:    http://www.x.org/pub/individual/driver/%{tarball}-%{version}.tar.bz2
 %endif
 # unlike the other drivers, radeon.xinf is generated
 Source1:    mkxinf
-Source2:    radeon-firmware-6.tar.bz2
+Source2:    radeon-firmware-7.tar.bz2
+Source3:    make-git-snapshot.sh
 
 Patch10:    radeon-6.12.2-lvds-default-modes.patch
 Patch13:    fix-default-modes.patch
+Patch14:    rn50-disable-accel.patch
+Patch15:    fix-leak.patch
 
 ExcludeArch: s390 s390x
 
@@ -67,6 +70,8 @@ Firmware for ATI R600/R700 IRQs + Evergreen/Northern Islands + Fusion
 %endif
 %patch10 -p1 -b .lvds
 %patch13 -p1 -b .def
+%patch14 -p1 -b .rn50
+%patch15 -p1 -b .leak
 
 %build
 autoreconf -fiv
@@ -109,6 +114,15 @@ rm -rf $RPM_BUILD_ROOT
 /lib/firmware/radeon/*.bin
 
 %changelog
+* Thu Feb 19 2015 Jérôme Glisse <jglisse@redhat.com> 7.5.99-3
+- Fix the fix memory leak (covscan)
+
+* Thu Feb 19 2015 Jérôme Glisse <jglisse@redhat.com> 7.5.99-2
+- Fix memory leak (covscan)
+
+* Thu Jan 29 2015 Jérôme Glisse <jglisse@redhat.com> 7.5.99-1
+- git snapshot ati 7.5.99 and updated firmware and rn50 accel disabled
+
 * Fri May 09 2014 Jérôme Glisse <jglisse@redhat.com> 7.3.99-2
 - Fix ppc build.
 

@@ -208,6 +208,9 @@ KABINI APUs
 .TP 12
 .B HAWAII
 Radeon R9 series
+.TP 12
+.B MULLINS
+MULLINS APUs
 .PD
 .SH CONFIGURATION DETAILS
 Please refer to __xconfigfile__(__filemansuffix__) for general configuration
@@ -222,12 +225,11 @@ are supported:
 Selects software cursor.  The default is
 .B off.
 .TP
-.BI "Option \*qNoAccel\*q \*q" boolean \*q
+.BI "Option \*qAccel\*q \*q" boolean \*q
 Enables or disables all hardware acceleration.
 .br
-The default is to
-.B enable
-hardware acceleration.
+The default is
+.B on.
 .TP
 .BI "Option \*qZaphodHeads\*q \*q" string \*q
 Specify the RandR output(s) to use with zaphod mode for a particular driver
