@@ -1,13 +1,13 @@
 %define tarball xf86-video-ati
 %define moduledir %(pkg-config xorg-server --variable=moduledir )
 %define driverdir	%{moduledir}/drivers
-%define gitdate 20150129
-%define gitversion c80ea1e
+#define gitdate 20151111
+#define gitversion  7186a871
 
 Summary:   Xorg X11 ati video driver
 Name:      xorg-x11-drv-ati
-Version:   7.5.99
-Release:   3%{?dist}
+Version:   7.6.1
+Release:   2%{?dist}
 URL:       http://www.x.org
 License:   MIT
 Group:     User Interface/X Hardware Support
@@ -20,13 +20,13 @@ Source0:    http://www.x.org/pub/individual/driver/%{tarball}-%{version}.tar.bz2
 %endif
 # unlike the other drivers, radeon.xinf is generated
 Source1:    mkxinf
-Source2:    radeon-firmware-7.tar.bz2
+Source2:    radeon-firmware-8.tar.bz2
 Source3:    make-git-snapshot.sh
+Source4:    LICENSE.radeon
 
 Patch10:    radeon-6.12.2-lvds-default-modes.patch
 Patch13:    fix-default-modes.patch
 Patch14:    rn50-disable-accel.patch
-Patch15:    fix-leak.patch
 
 ExcludeArch: s390 s390x
 
@@ -51,7 +51,7 @@ Requires:  libdrm >= 2.4.37
 Requires:  kernel >= 2.6.32-33.el6
 Obsoletes: xorg-x11-drv-avivo <= 0.0.2
 
-%description 
+%description
 X.Org X11 ati video driver.
 
 %package firmware
@@ -71,7 +71,6 @@ Firmware for ATI R600/R700 IRQs + Evergreen/Northern Islands + Fusion
 %patch10 -p1 -b .lvds
 %patch13 -p1 -b .def
 %patch14 -p1 -b .rn50
-%patch15 -p1 -b .leak
 
 %build
 autoreconf -fiv
@@ -97,6 +96,9 @@ find $RPM_BUILD_ROOT -regex ".*\.la$" | xargs rm -f --
 %{__mkdir_p} %{buildroot}/lib/firmware/radeon
 %{__install} -p -m 0644 radeon/*.bin %{buildroot}/lib/firmware/radeon/
 
+mkdir -p $RPM_BUILD_ROOT%{_docdir}/%{name}-firmware-%{version}
+install -m 0644 %{SOURCE4} $RPM_BUILD_ROOT%{_docdir}/%{name}-firmware-%{version}
+
 %clean
 rm -rf $RPM_BUILD_ROOT
 
@@ -110,10 +112,22 @@ rm -rf $RPM_BUILD_ROOT
 
 %files firmware
 %defattr(-,root,root,-)
-%doc LICENSE.radeon.firmware
+%dir %{_docdir}/%{name}-firmware-%{version}
+%doc %{_docdir}/%{name}-firmware-%{version}/LICENSE.radeon
 /lib/firmware/radeon/*.bin
 
 %changelog
+* Thu Mar 3 2016 Lyude Paul <cpaul@redhat.com> 7.6.1-2
+- Fix annoying trailing whitespace after %description
+- Update firmware license
+- Added missing firmware file TAHITI_vce.bin (#1310823)
+
+* Thu Nov 12 2015 Adam Jackson <ajax@redhat.com> 7.6.1-1
+- ati 7.6.1
+
+* Wed Nov 11 2015 Adam Jackson <ajax@redhat.com> 7.5.99-4
+- New git snap for server 1.17
+
 * Thu Feb 19 2015 Jérôme Glisse <jglisse@redhat.com> 7.5.99-3
 - Fix the fix memory leak (covscan)
 
