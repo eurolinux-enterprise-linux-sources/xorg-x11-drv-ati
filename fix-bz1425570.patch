@@ -1,0 +1,117 @@
+From a2a85d0ecda6b42bb4203616ecb5df6b1a32059f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michel=20D=C3=A4nzer?= <michel.daenzer@amd.com>
+Date: Wed, 1 Mar 2017 18:00:40 +0900
+Subject: [PATCH] Call drmmode_set_desired_modes from a WindowExposures hook
+
+This is the earliest opportunity where the root window contents are
+guaranteed to be initialized, and prevents drmmode_set_mode_major from
+getting called before drmmode_set_desired_modes via RADEONUnblank ->
+drmmode_crtc_dpms. Also, in contrast to the BlockHandler hook, this is
+called when running Xorg with -pogo.
+
+Fixes intermittently showing garbage on server startup or after server
+reset.
+
+As a bonus, this avoids trouble due to higher layers (e.g. the tigervnc
+Xorg module) calling RADEONBlockHandler_oneshot repeatedly even after
+we set pScreen->BlockHandler = RADEONBlockHandler_KMS.
+
+v2:
+* Drop spaces between XORG_VERSION_NUMERIC arguments
+* Call radeon_bo_wait after radeon_cs_flush_indirect
+
+Bugzilla: https://bugs.freedesktop.org/99457
+Reviewed-by: Alex Deucher <alexander.deucher@amd.com> (v1)
+---
+ src/radeon.h     |  1 +
+ src/radeon_kms.c | 41 +++++++++++++++++++++++++++++------------
+ 2 files changed, 30 insertions(+), 12 deletions(-)
+
+diff --git a/src/radeon.h b/src/radeon.h
+index e2fd41c..c9812b1 100644
+--- a/src/radeon.h
++++ b/src/radeon.h
+@@ -498,6 +498,7 @@ typedef struct {
+ #if GET_ABI_MAJOR(ABI_VIDEODRV_VERSION) >= 10
+     CreateWindowProcPtr CreateWindow;
+ #endif
++    WindowExposuresProcPtr WindowExposures;
+ 
+     Bool              IsSecondary;
+ 
+diff --git a/src/radeon_kms.c b/src/radeon_kms.c
+index 8aa7633..f2b9262 100644
+--- a/src/radeon_kms.c
++++ b/src/radeon_kms.c
+@@ -545,17 +545,6 @@ static void RADEONBlockHandler_KMS(BLOCKHANDLER_ARGS_DECL)
+ #endif
+ }
+ 
+-static void RADEONBlockHandler_oneshot(BLOCKHANDLER_ARGS_DECL)
+-{
+-    SCREEN_PTR(arg);
+-    ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
+-    RADEONInfoPtr info = RADEONPTR(pScrn);
+-
+-    drmmode_set_desired_modes(pScrn, &info->drmmode, TRUE);
+-
+-    RADEONBlockHandler_KMS(BLOCKHANDLER_ARGS);
+-}
+-
+ static void
+ radeon_flush_callback(CallbackListPtr *list,
+ 		      pointer user_data, pointer call_data)
+@@ -1061,6 +1050,32 @@ static Bool RADEONCreateWindow_oneshot(WindowPtr pWin)
+ 
+ #endif
+ 
++/* When the root window is mapped, set the initial modes */
++static void RADEONWindowExposures_oneshot(WindowPtr pWin, RegionPtr pRegion
++#if XORG_VERSION_CURRENT < XORG_VERSION_NUMERIC(1,16,99,901,0)
++					  , RegionPtr pBSRegion
++#endif
++    )
++{
++    ScreenPtr pScreen = pWin->drawable.pScreen;
++    ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
++    RADEONInfoPtr info = RADEONPTR(pScrn);
++
++    if (pWin != pScreen->root)
++	ErrorF("%s called for non-root window %p\n", __func__, pWin);
++
++    pScreen->WindowExposures = info->WindowExposures;
++#if XORG_VERSION_CURRENT < XORG_VERSION_NUMERIC(1,16,99,901,0)
++    pScreen->WindowExposures(pWin, pRegion, RegionPtr pBSRegion);
++#else
++    pScreen->WindowExposures(pWin, pRegion);
++#endif
++
++    radeon_cs_flush_indirect(pScrn);
++    radeon_bo_wait(info->front_bo);
++    drmmode_set_desired_modes(pScrn, &info->drmmode, TRUE);
++}
++
+ Bool RADEONPreInit_KMS(ScrnInfoPtr pScrn, int flags)
+ {
+     RADEONInfoPtr     info;
+@@ -1727,6 +1742,8 @@ Bool RADEONScreenInit_KMS(SCREEN_INIT_ARGS_DECL)
+ 	pScreen->CreateWindow = RADEONCreateWindow_oneshot;
+     }
+ #endif
++    info->WindowExposures = pScreen->WindowExposures;
++    pScreen->WindowExposures = RADEONWindowExposures_oneshot;
+ 
+     /* Provide SaveScreen & wrap BlockHandler and CloseScreen */
+     /* Wrap CloseScreen */
+@@ -1734,7 +1751,7 @@ Bool RADEONScreenInit_KMS(SCREEN_INIT_ARGS_DECL)
+     pScreen->CloseScreen = RADEONCloseScreen_KMS;
+     pScreen->SaveScreen  = RADEONSaveScreen_KMS;
+     info->BlockHandler = pScreen->BlockHandler;
+-    pScreen->BlockHandler = RADEONBlockHandler_oneshot;
++    pScreen->BlockHandler = RADEONBlockHandler_KMS;
+ 
+     if (!AddCallback(&FlushCallback, radeon_flush_callback, pScrn))
+         return FALSE;
+-- 
+2.9.3
+

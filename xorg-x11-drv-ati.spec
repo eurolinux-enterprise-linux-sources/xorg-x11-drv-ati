@@ -7,7 +7,7 @@
 Summary:   Xorg X11 ati video driver
 Name:      xorg-x11-drv-ati
 Version:   7.6.1
-Release:   2%{?dist}
+Release:   3%{?dist}
 URL:       http://www.x.org
 License:   MIT
 Group:     User Interface/X Hardware Support
@@ -27,6 +27,7 @@ Source4:    LICENSE.radeon
 Patch10:    radeon-6.12.2-lvds-default-modes.patch
 Patch13:    fix-default-modes.patch
 Patch14:    rn50-disable-accel.patch
+Patch15:    fix-bz1425570.patch
 
 ExcludeArch: s390 s390x
 
@@ -71,6 +72,7 @@ Firmware for ATI R600/R700 IRQs + Evergreen/Northern Islands + Fusion
 %patch10 -p1 -b .lvds
 %patch13 -p1 -b .def
 %patch14 -p1 -b .rn50
+%patch15 -p1 -b .bz1425570
 
 %build
 autoreconf -fiv
@@ -117,6 +119,9 @@ rm -rf $RPM_BUILD_ROOT
 /lib/firmware/radeon/*.bin
 
 %changelog
+* Thu Apr 19 2017 Lyude Paul <lyude@redhat.com> 7.6.1-3
+- Add patch for #1425570
+
 * Thu Mar 3 2016 Lyude Paul <cpaul@redhat.com> 7.6.1-2
 - Fix annoying trailing whitespace after %description
 - Update firmware license
