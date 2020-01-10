@@ -7,7 +7,7 @@
 Summary:   Xorg X11 ati video driver
 Name:      xorg-x11-drv-ati
 Version:   7.6.1
-Release:   3%{?dist}
+Release:   4%{?dist}
 URL:       http://www.x.org
 License:   MIT
 Group:     User Interface/X Hardware Support
@@ -20,7 +20,7 @@ Source0:    http://www.x.org/pub/individual/driver/%{tarball}-%{version}.tar.bz2
 %endif
 # unlike the other drivers, radeon.xinf is generated
 Source1:    mkxinf
-Source2:    radeon-firmware-8.tar.bz2
+Source2:    radeon-firmware-9.tar.bz2
 Source3:    make-git-snapshot.sh
 Source4:    LICENSE.radeon
 
@@ -119,6 +119,14 @@ rm -rf $RPM_BUILD_ROOT
 /lib/firmware/radeon/*.bin
 
 %changelog
+* Mon Jan 22 2018 Lyude Paul <lyude@redhat.com> 7.6.1-4
+- Add missing firmware file OLAND_pfp.bin (#1361525)
+- While we're at it since this is the last time we'll have a chance to do this,
+  also go through and add missing firmware files for all of the generations
+  that should have been included when this tarball was made so we don't have
+  to deal with problems like this in the future. This includes RS780, RV610,
+  RV620, RV630, RV635, RV670, RV710, RV730, and RV770
+
 * Thu Apr 19 2017 Lyude Paul <lyude@redhat.com> 7.6.1-3
 - Add patch for #1425570
 
