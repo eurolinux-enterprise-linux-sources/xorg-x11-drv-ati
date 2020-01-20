@@ -1,8 +1,8 @@
 %global tarball xf86-video-ati
 %global moduledir %(pkg-config xorg-server --variable=moduledir )
 %global driverdir	%{moduledir}/drivers
-#global gitdate 20160928
-#global gitversion 3fc839ff
+%global gitdate 20160928
+%global gitversion 3fc839ff
 
 %undefine _hardened_build
 
@@ -12,25 +12,26 @@
 
 Summary:   Xorg X11 ati video driver
 Name:      xorg-x11-drv-ati
-Version:   7.10.0
-Release:   1%{?gver}%{?dist}
+Version:   7.7.1
+Release:   3%{?gver}%{?dist}
 URL:       http://www.x.org
 License:   MIT
 Group:     User Interface/X Hardware Support
 
-Source0:    http://www.x.org/pub/individual/driver/%{tarball}-%{version}.tar.bz2
-#Source0: %{tarball}-%{gitdate}.tar.xz
+#Source0:    http://www.x.org/pub/individual/driver/%{tarball}-%{version}.tar.bz2
+Source0: %{tarball}-%{gitdate}.tar.xz
 
 Patch1:     fix-dri-removal.patch
 Patch10:    radeon-6.12.2-lvds-default-modes.patch
 Patch13:    fix-default-modes.patch
+Patch14:    0001-modesetting-Validate-the-atom-for-enum-properties.patch
 
 ExcludeArch: s390 s390x
 
 BuildRequires: python
 BuildRequires: xorg-x11-server-devel >= 1.17.0
 BuildRequires: mesa-libGL-devel >= 9.2-1
-BuildRequires: libdrm-devel >= 2.4.78
+BuildRequires: libdrm-devel >= 2.4.46-1
 BuildRequires: kernel-headers >= 3.10.0-31
 BuildRequires: automake autoconf libtool pkgconfig
 BuildRequires: xorg-x11-util-macros >= 1.17-3
@@ -49,6 +50,7 @@ X.Org X11 ati video driver.
 %patch1 -p1 -b .fix-dri
 %patch10 -p1 -b .lvds
 %patch13 -p1 -b .def
+%patch14 -p1 -b .enum
 
 %build
 autoreconf -iv
@@ -67,16 +69,12 @@ find $RPM_BUILD_ROOT -regex ".*\.la$" | xargs rm -f --
 rm -rf $RPM_BUILD_ROOT%{moduledir}/multimedia/
 
 %files
-%{_datadir}/X11/xorg.conf.d/10-radeon.conf
 %{driverdir}/ati_drv.so
 %{driverdir}/radeon_drv.so
 %{_mandir}/man4/ati.4*
 %{_mandir}/man4/radeon.4*
 
 %changelog
-* Mon Oct 09 2017 Adam Jackson <ajax@redhat.com> - 7.10.0-1
-- ati 7.10.0
-
 * Mon Jun 19 2017 Adam Jackson <ajax@redhat.com> - 7.7.1-3
 - Validate RANDR output property atoms
 
