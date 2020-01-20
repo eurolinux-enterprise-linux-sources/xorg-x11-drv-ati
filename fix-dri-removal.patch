@@ -1,0 +1,97 @@
+diff -up xf86-video-ati-7.10.0/src/drmmode_display.c.jx xf86-video-ati-7.10.0/src/drmmode_display.c
+--- xf86-video-ati-7.10.0/src/drmmode_display.c.jx	2017-09-14 14:29:43.180486543 -0400
++++ xf86-video-ati-7.10.0/src/drmmode_display.c	2017-09-14 14:30:28.008914457 -0400
+@@ -44,6 +44,8 @@
+ #include "radeon_reg.h"
+ 
+ #include <dri.h>
++#include <dri2.h>
++#include "radeon_dri2.h"
+ 
+ #include "drmmode_display.h"
+ 
+@@ -2554,7 +2556,7 @@ Bool drmmode_pre_init(ScrnInfoPtr pScrn,
+ 	/* workout clones */
+ 	drmmode_clones_init(pScrn, drmmode, mode_res);
+ 
+-	bus_id_string = DRICreatePCIBusID(info->PciInfo);
++	bus_id_string = radeon_dri2_create_pci_bus_id(info->PciInfo);
+ 	XNFasprintf(&provider_name, "%s @ %s", pScrn->chipset, bus_id_string);
+ 	free(bus_id_string);
+ 	xf86ProviderSetup(pScrn, NULL, provider_name);
+diff -up xf86-video-ati-7.10.0/src/radeon_dri2.c.jx xf86-video-ati-7.10.0/src/radeon_dri2.c
+--- xf86-video-ati-7.10.0/src/radeon_dri2.c.jx	2017-09-08 04:09:39.000000000 -0400
++++ xf86-video-ati-7.10.0/src/radeon_dri2.c	2017-09-14 14:29:43.181486552 -0400
+@@ -1484,5 +1484,18 @@ void radeon_dri2_close_screen(ScreenPtr
+     drmFree(info->dri2.device_name);
+ }
+ 
++/* DRI provided a function for this but DRI2 doesn't, so define here */
++char *radeon_dri2_create_pci_bus_id(const struct pci_device *pci_dev)
++{
++    char *bus_id;
++
++    if (asprintf(&bus_id, "pci:%04x:%02x:%02x.%d",
++                 pci_dev->domain, pci_dev->bus, pci_dev->dev,
++                 pci_dev->func) == -1)
++        return NULL;
++
++    return bus_id;
++}
++
+ #endif /* DRI2 */
+ 
+diff -up xf86-video-ati-7.10.0/src/radeon_dri2.h.jx xf86-video-ati-7.10.0/src/radeon_dri2.h
+--- xf86-video-ati-7.10.0/src/radeon_dri2.h.jx	2017-09-08 04:09:39.000000000 -0400
++++ xf86-video-ati-7.10.0/src/radeon_dri2.h	2017-09-14 14:29:43.181486552 -0400
+@@ -41,11 +41,13 @@ struct radeon_dri2 {
+ #include "dri2.h"
+ Bool radeon_dri2_screen_init(ScreenPtr pScreen);
+ void radeon_dri2_close_screen(ScreenPtr pScreen);
++char *radeon_dri2_create_pci_bus_id(const struct pci_device *pci_dev);
+ 
+ #else
+ 
+ static inline Bool radeon_dri2_screen_init(ScreenPtr pScreen) { return FALSE; }
+ static inline void radeon_dri2_close_screen(ScreenPtr pScreen) {}
++static inline char *radeon_dri2_create_pci_bus_id(const struct pci_device *pci_dev) {}
+ 
+ #endif
+ 
+diff -up xf86-video-ati-7.10.0/src/radeon_probe.c.jx xf86-video-ati-7.10.0/src/radeon_probe.c
+--- xf86-video-ati-7.10.0/src/radeon_probe.c.jx	2017-09-08 04:09:39.000000000 -0400
++++ xf86-video-ati-7.10.0/src/radeon_probe.c	2017-09-14 14:31:00.583224457 -0400
+@@ -47,7 +47,9 @@
+ 
+ #include "xf86.h"
+ 
++#include "xf86drm.h"
+ #include "xf86drmMode.h"
++#include "dri2.h"
+ 
+ #if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,19,99,1,0)
+ #include <xf86Pci.h>
+@@ -69,6 +71,8 @@
+ 
+ #include "radeon_pci_device_match_gen.h"
+ 
++#include "radeon_dri2.h"
++
+ _X_EXPORT int gRADEONEntityIndex = -1;
+ 
+ /* Return the options for supported chipset 'n'; NULL otherwise */
+@@ -93,13 +97,7 @@ static Bool radeon_kernel_mode_enabled(S
+     char *busIdString;
+     int ret;
+ 
+-    if (!xf86LoaderCheckSymbol("DRICreatePCIBusID")) {
+-      xf86DrvMsgVerb(pScrn->scrnIndex, X_INFO, 0,
+-		   "[KMS] No DRICreatePCIBusID symbol, no kernel modesetting.\n");
+-	return FALSE;
+-    }
+-
+-    busIdString = DRICreatePCIBusID(pci_dev);
++    busIdString = radeon_dri2_create_pci_bus_id(pci_dev);
+     ret = drmCheckModesettingSupported(busIdString);
+ #if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
+     if (ret) {
