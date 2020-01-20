@@ -144,7 +144,7 @@ void RADEONInitVideo(ScreenPtr pScreen)
 
     num_adaptors = xf86XVListGenericAdaptors(pScrn, &adaptors);
     newAdaptors = malloc((num_adaptors + 2) * sizeof(*newAdaptors));
-    if (!newAdaptors)
+    if (newAdaptors == NULL)
 	return;
 
     memcpy(newAdaptors, adaptors, num_adaptors * sizeof(XF86VideoAdaptorPtr));
@@ -152,7 +152,7 @@ void RADEONInitVideo(ScreenPtr pScreen)
 
     if (info->use_glamor) {
         texturedAdaptor = radeon_glamor_xv_init(pScreen, 16);
-	if (texturedAdaptor) {
+	if (texturedAdaptor != NULL) {
 	    adaptors[num_adaptors++] = texturedAdaptor;
 	    xf86DrvMsg(pScrn->scrnIndex, X_INFO, "Set up textured video (glamor)\n");
 	} else
@@ -161,7 +161,7 @@ void RADEONInitVideo(ScreenPtr pScreen)
 	|| (info->directRenderingEnabled)
 	) {
 	texturedAdaptor = RADEONSetupImageTexturedVideo(pScreen);
-	if (texturedAdaptor) {
+	if (texturedAdaptor != NULL) {
 	    adaptors[num_adaptors++] = texturedAdaptor;
 	    xf86DrvMsg(pScrn->scrnIndex, X_INFO, "Set up textured video\n");
 	} else

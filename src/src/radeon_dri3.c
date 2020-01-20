@@ -37,7 +37,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <gbm.h>
 #include <errno.h>
 #include <libgen.h>
 
@@ -170,7 +169,6 @@ static PixmapPtr radeon_dri3_pixmap_from_fd(ScreenPtr screen,
 
 			if (priv) {
 				radeon_set_pixmap_private(pixmap, priv);
-				pixmap->usage_hint |= RADEON_CREATE_PIXMAP_DRI2;
 				return pixmap;
 			}
 
@@ -213,44 +211,19 @@ static int radeon_dri3_fd_from_pixmap(ScreenPtr screen,
 				      CARD16 *stride,
 				      CARD32 *size)
 {
-	struct radeon_buffer *bo;
+	struct radeon_bo *bo;
 	int fd;
-#ifdef USE_GLAMOR
-	ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
-	RADEONInfoPtr info = RADEONPTR(scrn);
-
-	if (info->use_glamor) {
-		Bool need_flush = TRUE;
-		int ret = -1;
-#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,19,99,904,0)
-		struct gbm_bo *gbm_bo = glamor_gbm_bo_from_pixmap(screen, pixmap);
-
-		if (gbm_bo) {
-			ret = gbm_bo_get_fd(gbm_bo);
-			gbm_bo_destroy(gbm_bo);
-
-			if (ret >= 0)
-				need_flush = FALSE;
-		}
-#endif
-
-		if (ret < 0)
-			ret = glamor_fd_from_pixmap(screen, pixmap, stride, size);
-
-		/* glamor might have needed to reallocate the pixmap storage and
-		 * copy the pixmap contents to the new storage. The copy
-		 * operation needs to be flushed to the kernel driver before the
-		 * client starts using the pixmap storage for direct rendering.
-		 */
-		if (ret >= 0 && need_flush)
-			radeon_cs_flush_indirect(scrn);
-
-		return ret;
-	}
-#endif
 
 	bo = radeon_get_pixmap_bo(pixmap);
 	if (!bo) {
+#ifdef USE_GLAMOR
+		ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
+		RADEONInfoPtr info = RADEONPTR(scrn);
+
+		if (info->use_glamor)
+			return glamor_fd_from_pixmap(screen, pixmap, stride, size);
+#endif
+
 		exaMoveInPixmap(pixmap);
 		bo = radeon_get_pixmap_bo(pixmap);
 		if (!bo)
@@ -260,11 +233,11 @@ static int radeon_dri3_fd_from_pixmap(ScreenPtr screen,
 	if (pixmap->devKind > UINT16_MAX)
 		return -1;
 
-	if (radeon_gem_prime_share_bo(bo->bo.radeon, &fd) < 0)
+	if (radeon_gem_prime_share_bo(bo, &fd) < 0)
 		return -1;
 
 	*stride = pixmap->devKind;
-	*size = bo->bo.radeon->size;
+	*size = bo->size;
 	return fd;
 }
 

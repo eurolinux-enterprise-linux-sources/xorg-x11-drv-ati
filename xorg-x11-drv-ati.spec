@@ -12,19 +12,18 @@
 
 Summary:   Xorg X11 ati video driver
 Name:      xorg-x11-drv-ati
-Version:   19.0.1
-Release:   2%{?gver}%{?dist}
+Version:   7.10.0
+Release:   1%{?gver}%{?dist}
 URL:       http://www.x.org
 License:   MIT
 Group:     User Interface/X Hardware Support
 
-Source0:    https://www.x.org/pub/individual/driver/%{tarball}-%{version}.tar.bz2
+Source0:    http://www.x.org/pub/individual/driver/%{tarball}-%{version}.tar.bz2
 #Source0: %{tarball}-%{gitdate}.tar.xz
 
 Patch1:     fix-dri-removal.patch
 Patch10:    radeon-6.12.2-lvds-default-modes.patch
 Patch13:    fix-default-modes.patch
-Patch14:    0001-Avoid-RADEONLeaveVT_KMS-after-we-left-the-VT.patch
 
 ExcludeArch: s390 s390x
 
@@ -37,7 +36,6 @@ BuildRequires: automake autoconf libtool pkgconfig
 BuildRequires: xorg-x11-util-macros >= 1.17-3
 BuildRequires: systemd-devel
 BuildRequires: xorg-x11-glamor-devel
-BuildRequires: mesa-libgbm-devel
 
 Requires: Xorg %(xserver-sdk-abi-requires ansic)
 Requires: Xorg %(xserver-sdk-abi-requires videodrv)
@@ -51,7 +49,6 @@ X.Org X11 ati video driver.
 %patch1 -p1 -b .fix-dri
 %patch10 -p1 -b .lvds
 %patch13 -p1 -b .def
-%patch14 -p1 -b .leavevt
 
 %build
 autoreconf -iv
@@ -77,21 +74,6 @@ rm -rf $RPM_BUILD_ROOT%{moduledir}/multimedia/
 %{_mandir}/man4/radeon.4*
 
 %changelog
-* Thu May 23 2019 Olivier Fourdan <ofourdan@redhat.com> - 19.0.1-2
-- Avoid breakage on Xserver reset (#1674474)
-
-* Thu Mar 21 2019 Adam Jackson <ajax@redhat.com> - 19.0.1-1
-- ati 19.0.1
-
-* Thu Nov 22 2018 Dave Airlie <airlied@redhat.com> - 18.1.0-1
-- ati 18.1.0 fix some regressions with new X server (#1648116)
-
-* Wed May 30 2018 Adam Jackson <ajax@redhat.com> - 18.0.1-1
-- ati 18.0.1
-
-* Wed May 30 2018 Adam Jackson <ajax@redhat.com> - 7.10.0-1.1
-- Rebuild for xserver 1.20
-
 * Mon Oct 09 2017 Adam Jackson <ajax@redhat.com> - 7.10.0-1
 - ati 7.10.0
 

@@ -138,8 +138,7 @@ RADEONPrepareSolid(PixmapPtr pPix, int alu, Pixel pm, Pixel fg)
     radeon_cs_space_reset_bos(info->cs);
 
     driver_priv = exaGetPixmapDriverPrivate(pPix);
-    radeon_cs_space_add_persistent_bo(info->cs, driver_priv->bo->bo.radeon, 0,
-				      RADEON_GEM_DOMAIN_VRAM);
+    radeon_cs_space_add_persistent_bo(info->cs, driver_priv->bo, 0, RADEON_GEM_DOMAIN_VRAM);
 
     ret = radeon_cs_space_check(info->cs);
     if (ret)
@@ -147,7 +146,7 @@ RADEONPrepareSolid(PixmapPtr pPix, int alu, Pixel pm, Pixel fg)
 
     driver_priv = exaGetPixmapDriverPrivate(pPix);
     if (driver_priv) {
-	info->state_2d.dst_bo = driver_priv->bo->bo.radeon;
+	info->state_2d.dst_bo = driver_priv->bo;
  	info->state_2d.dst_domain = driver_priv->shared ? RADEON_GEM_DOMAIN_GTT : RADEON_GEM_DOMAIN_VRAM;
     }
 
@@ -257,15 +256,13 @@ RADEONPrepareCopy(PixmapPtr pSrc,   PixmapPtr pDst,
     radeon_cs_space_reset_bos(info->cs);
 
     driver_priv = exaGetPixmapDriverPrivate(pSrc);
-    radeon_cs_space_add_persistent_bo(info->cs, driver_priv->bo->bo.radeon,
-				      RADEON_GEM_DOMAIN_GTT | RADEON_GEM_DOMAIN_VRAM, 0);
-    info->state_2d.src_bo = driver_priv->bo->bo.radeon;
+    radeon_cs_space_add_persistent_bo(info->cs, driver_priv->bo, RADEON_GEM_DOMAIN_GTT | RADEON_GEM_DOMAIN_VRAM, 0);
+    info->state_2d.src_bo = driver_priv->bo;
 
     driver_priv = exaGetPixmapDriverPrivate(pDst);
-    info->state_2d.dst_bo = driver_priv->bo->bo.radeon;
+    info->state_2d.dst_bo = driver_priv->bo;
     info->state_2d.dst_domain = driver_priv->shared ? RADEON_GEM_DOMAIN_GTT : RADEON_GEM_DOMAIN_VRAM;
-    radeon_cs_space_add_persistent_bo(info->cs, driver_priv->bo->bo.radeon, 0,
-				      info->state_2d.dst_domain);
+    radeon_cs_space_add_persistent_bo(info->cs, driver_priv->bo, 0, info->state_2d.dst_domain);
 
     ret = radeon_cs_space_check(info->cs);
     if (ret)
@@ -331,7 +328,7 @@ RADEONBlitChunk(ScrnInfoPtr pScrn, struct radeon_bo *src_bo,
 
     if (src_bo && dst_bo) {
         BEGIN_ACCEL_RELOC(6, 2);
-    } else if (src_bo && !dst_bo) {
+    } else if (src_bo && dst_bo == NULL) {
         BEGIN_ACCEL_RELOC(6, 1);
     } else {
         BEGIN_RING(2*6);
@@ -392,7 +389,7 @@ RADEONUploadToScreenCS(PixmapPtr pDst, int x, int y, int w, int h,
 	return FALSE;
 
     driver_priv = exaGetPixmapDriverPrivate(pDst);
-    if (!driver_priv || !driver_priv->bo->bo.radeon)
+    if (!driver_priv || !driver_priv->bo)
 	return FALSE;
 
 #if X_BYTE_ORDER == X_BIG_ENDIAN
@@ -407,12 +404,12 @@ RADEONUploadToScreenCS(PixmapPtr pDst, int x, int y, int w, int h,
 #endif
 
     /* If we know the BO won't be busy / in VRAM, don't bother with a scratch */
-    copy_dst = driver_priv->bo->bo.radeon;
+    copy_dst = driver_priv->bo;
     copy_pitch = pDst->devKind;
     if (!(driver_priv->tiling_flags & (RADEON_TILING_MACRO | RADEON_TILING_MICRO))) {
-	if (!radeon_bo_is_referenced_by_cs(driver_priv->bo->bo.radeon, info->cs)) {
+	if (!radeon_bo_is_referenced_by_cs(driver_priv->bo, info->cs)) {
 	    flush = FALSE;
-	    if (!radeon_bo_is_busy(driver_priv->bo->bo.radeon, &dst_domain) &&
+	    if (!radeon_bo_is_busy(driver_priv->bo, &dst_domain) &&
 		!(dst_domain & RADEON_GEM_DOMAIN_VRAM))
 		goto copy;
 	}
@@ -423,7 +420,7 @@ RADEONUploadToScreenCS(PixmapPtr pDst, int x, int y, int w, int h,
 
     size = scratch_pitch * h;
     scratch = radeon_bo_open(info->bufmgr, 0, size, 0, RADEON_GEM_DOMAIN_GTT, 0);
-    if (!scratch) {
+    if (scratch == NULL) {
 	goto copy;
     }
     radeon_cs_space_reset_bos(info->cs);
@@ -449,7 +446,7 @@ copy:
     r = TRUE;
     size = w * bpp / 8;
     dst = copy_dst->ptr;
-    if (copy_dst == driver_priv->bo->bo.radeon)
+    if (copy_dst == driver_priv->bo)
 	dst += y * copy_pitch + x * bpp / 8;
     for (i = 0; i < h; i++) {
         RADEONCopySwap(dst + i * copy_pitch, (uint8_t*)src, size, swap);
@@ -461,7 +458,7 @@ copy:
 	RADEONGetDatatypeBpp(pDst->drawable.bitsPerPixel, &datatype);
 	RADEONGetPixmapOffsetPitch(pDst, &dst_pitch_offset);
 	RADEON_SWITCH_TO_2D();
-	RADEONBlitChunk(pScrn, scratch, driver_priv->bo->bo.radeon, datatype, scratch_pitch << 16,
+	RADEONBlitChunk(pScrn, scratch, driver_priv->bo, datatype, scratch_pitch << 16,
 			dst_pitch_offset, 0, 0, x, y, w, h,
 			RADEON_GEM_DOMAIN_GTT, RADEON_GEM_DOMAIN_VRAM);
     }
@@ -496,7 +493,7 @@ RADEONDownloadFromScreenCS(PixmapPtr pSrc, int x, int y, int w,
 	return FALSE;
 
     driver_priv = exaGetPixmapDriverPrivate(pSrc);
-    if (!driver_priv || !driver_priv->bo->bo.radeon)
+    if (!driver_priv || !driver_priv->bo)
 	return FALSE;
 
 #if X_BYTE_ORDER == X_BIG_ENDIAN
@@ -511,11 +508,11 @@ RADEONDownloadFromScreenCS(PixmapPtr pSrc, int x, int y, int w,
 #endif
 
     /* If we know the BO won't end up in VRAM anyway, don't bother with a scratch */
-    copy_src = driver_priv->bo->bo.radeon;
+    copy_src = driver_priv->bo;
     copy_pitch = pSrc->devKind;
     if (!(driver_priv->tiling_flags & (RADEON_TILING_MACRO | RADEON_TILING_MICRO))) {
-	if (radeon_bo_is_referenced_by_cs(driver_priv->bo->bo.radeon, info->cs)) {
-	    src_domain = radeon_bo_get_src_domain(driver_priv->bo->bo.radeon);
+	if (radeon_bo_is_referenced_by_cs(driver_priv->bo, info->cs)) {
+	    src_domain = radeon_bo_get_src_domain(driver_priv->bo);
 	    if ((src_domain & (RADEON_GEM_DOMAIN_GTT | RADEON_GEM_DOMAIN_VRAM)) ==
 		(RADEON_GEM_DOMAIN_GTT | RADEON_GEM_DOMAIN_VRAM))
 		src_domain = 0;
@@ -524,14 +521,14 @@ RADEONDownloadFromScreenCS(PixmapPtr pSrc, int x, int y, int w,
 	}
 
 	if (!src_domain)
-	    radeon_bo_is_busy(driver_priv->bo->bo.radeon, &src_domain);
+	    radeon_bo_is_busy(driver_priv->bo, &src_domain);
 
 	if (src_domain & ~(uint32_t)RADEON_GEM_DOMAIN_VRAM)
 	    goto copy;
     }
     size = scratch_pitch * h;
     scratch = radeon_bo_open(info->bufmgr, 0, size, 0, RADEON_GEM_DOMAIN_GTT, 0);
-    if (!scratch) {
+    if (scratch == NULL) {
 	goto copy;
     }
     radeon_cs_space_reset_bos(info->cs);
@@ -544,8 +541,8 @@ RADEONDownloadFromScreenCS(PixmapPtr pSrc, int x, int y, int w,
     RADEONGetDatatypeBpp(pSrc->drawable.bitsPerPixel, &datatype);
     RADEONGetPixmapOffsetPitch(pSrc, &src_pitch_offset);
     RADEON_SWITCH_TO_2D();
-    RADEONBlitChunk(pScrn, driver_priv->bo->bo.radeon, scratch, datatype,
-		    src_pitch_offset, scratch_pitch << 16, x, y, 0, 0, w, h,
+    RADEONBlitChunk(pScrn, driver_priv->bo, scratch, datatype, src_pitch_offset,
+                    scratch_pitch << 16, x, y, 0, 0, w, h,
                     RADEON_GEM_DOMAIN_VRAM | RADEON_GEM_DOMAIN_GTT,
                     RADEON_GEM_DOMAIN_GTT);
     copy_src = scratch;
@@ -564,7 +561,7 @@ copy:
     }
     r = TRUE;
     w *= bpp / 8;
-    if (copy_src == driver_priv->bo->bo.radeon)
+    if (copy_src == driver_priv->bo)
 	size = y * copy_pitch + x * bpp / 8;
     else
 	size = 0;
@@ -584,7 +581,7 @@ Bool RADEONDrawInit(ScreenPtr pScreen)
 {
     RINFO_FROM_SCREEN(pScreen);
 
-    if (!info->accel_state->exa) {
+    if (info->accel_state->exa == NULL) {
 	xf86DrvMsg(pScreen->myNum, X_ERROR, "Memory map not set up\n");
 	return FALSE;
     }
@@ -641,6 +638,7 @@ Bool RADEONDrawInit(ScreenPtr pScreen)
     }
 #endif
 
+    info->accel_state->exa->CreatePixmap = RADEONEXACreatePixmap;
     info->accel_state->exa->DestroyPixmap = RADEONEXADestroyPixmap;
     info->accel_state->exa->PixmapIsOffscreen = RADEONEXAPixmapIsOffscreen;
     info->accel_state->exa->PrepareAccess = RADEONPrepareAccess_CS;

@@ -79,12 +79,11 @@ static DevPrivateKeyRec dri2_window_private_key_rec;
 static Bool
 radeon_get_flink_name(RADEONEntPtr pRADEONEnt, PixmapPtr pixmap, uint32_t *name)
 {
-    struct radeon_buffer *bo = radeon_get_pixmap_bo(pixmap);
+    struct radeon_bo *bo = radeon_get_pixmap_bo(pixmap);
     struct drm_gem_flink flink;
 
-    if (bo && !(bo->flags & RADEON_BO_FLAGS_GBM) &&
-	radeon_gem_get_kernel_name(bo->bo.radeon, name) == 0)
-	return TRUE;
+    if (bo)
+	return radeon_gem_get_kernel_name(bo, name) == 0;
 
     if (radeon_get_pixmap_handle(pixmap, &flink.handle)) {
 	if (drmIoctl(pRADEONEnt->fd, DRM_IOCTL_GEM_FLINK, &flink) != 0)
@@ -126,7 +125,6 @@ radeon_dri2_create_buffer2(ScreenPtr pScreen,
 	    cpp = 2;
 	    break;
 	case 24:
-	case 30:
 	    cpp = 4;
 	    break;
 	default:
@@ -234,42 +232,37 @@ radeon_dri2_create_buffer2(ScreenPtr pScreen,
 					  flags | RADEON_CREATE_PIXMAP_DRI2);
     }
 
-    if (!pixmap)
-	return NULL;
-
     buffers = calloc(1, sizeof *buffers);
-    if (!buffers)
+    if (buffers == NULL)
         goto error;
 
-    if (!info->use_glamor) {
-	info->exa_force_create = TRUE;
-	exaMoveInPixmap(pixmap);
-	info->exa_force_create = FALSE;
-	if (!exaGetPixmapDriverPrivate(pixmap)) {
-	    /* this happen if pixmap is non accelerable */
-	    goto error;
+    if (pixmap) {
+	if (!info->use_glamor) {
+	    info->exa_force_create = TRUE;
+	    exaMoveInPixmap(pixmap);
+	    info->exa_force_create = FALSE;
+	    if (exaGetPixmapDriverPrivate(pixmap) == NULL) {
+		/* this happen if pixmap is non accelerable */
+		goto error;
+	    }
+	} else if (is_glamor_pixmap) {
+	    pixmap = radeon_glamor_set_pixmap_bo(drawable, pixmap);
+	    pixmap->refcnt++;
 	}
-    } else if (is_glamor_pixmap) {
-	pixmap = radeon_glamor_set_pixmap_bo(drawable, pixmap);
-	pixmap->refcnt++;
 
-	/* The copy operation from radeon_glamor_set_pixmap_bo needs to
-	 * be flushed to the kernel driver before the client starts
-	 * using the pixmap storage for direct rendering.
-	 */
-	radeon_cs_flush_indirect(pScrn);
+	if (!radeon_get_flink_name(pRADEONEnt, pixmap, &buffers->name))
+	    goto error;
     }
 
-    if (!radeon_get_flink_name(pRADEONEnt, pixmap, &buffers->name))
-	goto error;
-
     privates = calloc(1, sizeof(struct dri2_buffer_priv));
-    if (!privates)
+    if (privates == NULL)
         goto error;
 
     buffers->attachment = attachment;
-    buffers->pitch = pixmap->devKind;
-    buffers->cpp = cpp;
+    if (pixmap) {
+	buffers->pitch = pixmap->devKind;
+	buffers->cpp = cpp;
+    }
     buffers->driverPrivate = privates;
     buffers->format = format;
     buffers->flags = 0; /* not tiled */
@@ -281,7 +274,8 @@ radeon_dri2_create_buffer2(ScreenPtr pScreen,
 
 error:
     free(buffers);
-    (*pScreen->DestroyPixmap)(pixmap);
+    if (pixmap)
+        (*pScreen->DestroyPixmap)(pixmap);
     return NULL;
 }
 
@@ -343,7 +337,9 @@ radeon_dri2_copy_region2(ScreenPtr pScreen,
     Bool vsync;
     Bool translate = FALSE;
     int off_x = 0, off_y = 0;
+    PixmapPtr dst_ppix;
 
+    dst_ppix = dst_private->pixmap;
     src_drawable = &src_private->pixmap->drawable;
     dst_drawable = &dst_private->pixmap->drawable;
 
@@ -360,6 +356,7 @@ radeon_dri2_copy_region2(ScreenPtr pScreen,
 	    dst_drawable = DRI2UpdatePrime(drawable, dest_buffer);
 	    if (!dst_drawable)
 		return;
+	    dst_ppix = (PixmapPtr)dst_drawable;
 	    if (dst_drawable != drawable)
 		translate = TRUE;
 	} else
@@ -383,7 +380,26 @@ radeon_dri2_copy_region2(ScreenPtr pScreen,
     (*gc->funcs->ChangeClip) (gc, CT_REGION, copy_clip, 0);
     ValidateGC(dst_drawable, gc);
 
+    /* If this is a full buffer swap or frontbuffer flush, throttle on the
+     * previous one
+     */
+    if (dst_private->attachment == DRI2BufferFrontLeft) {
+	if (REGION_NUM_RECTS(region) == 1) {
+	    BoxPtr extents = REGION_EXTENTS(pScreen, region);
+
+	    if (extents->x1 == 0 && extents->y1 == 0 &&
+		extents->x2 == drawable->width &&
+		extents->y2 == drawable->height) {
+		struct radeon_bo *bo = radeon_get_pixmap_bo(dst_ppix);
+
+		if (bo)
+		    radeon_bo_wait(bo);
+	    }
+	}
+    }
+
     vsync = info->accel_state->vsync;
+
     /* Driver option "SwapbuffersWait" defines if we vsync DRI2 copy-swaps. */ 
     info->accel_state->vsync = info->swapBuffersWait;
     info->accel_state->force = TRUE;
@@ -707,7 +723,7 @@ can_flip(xf86CrtcPtr crtc, DrawablePtr draw,
 
     if (draw->type != DRAWABLE_WINDOW ||
 	!info->allowPageFlip ||
-	info->sprites_visible > 0 ||
+	info->hwcursor_disabled ||
 	info->drmmode.present_flipping ||
 	!pScrn->vtSema ||
 	!DRI2CanFlip(draw))
@@ -726,8 +742,9 @@ radeon_dri2_exchange_buffers(DrawablePtr draw, DRI2BufferPtr front, DRI2BufferPt
 {
     struct dri2_buffer_priv *front_priv = front->driverPrivate;
     struct dri2_buffer_priv *back_priv = back->driverPrivate;
-    ScreenPtr screen = draw->pScreen;
-    RADEONInfoPtr info = RADEONPTR(xf86ScreenToScrn(screen));
+    struct radeon_bo *front_bo, *back_bo;
+    ScreenPtr screen;
+    RADEONInfoPtr info;
     RegionRec region;
     int tmp;
 
@@ -742,28 +759,23 @@ radeon_dri2_exchange_buffers(DrawablePtr draw, DRI2BufferPtr front, DRI2BufferPt
     front->name = back->name;
     back->name = tmp;
 
-    /* Swap pixmap privates */
-#ifdef USE_GLAMOR
-    if (info->use_glamor) {
-	struct radeon_pixmap *front_pix, *back_pix;
+    /* Swap pixmap bos */
+    front_bo = radeon_get_pixmap_bo(front_priv->pixmap);
+    back_bo = radeon_get_pixmap_bo(back_priv->pixmap);
+    radeon_set_pixmap_bo(front_priv->pixmap, back_bo);
+    radeon_set_pixmap_bo(back_priv->pixmap, front_bo);
 
-	front_pix = radeon_get_pixmap_private(front_priv->pixmap);
-	back_pix = radeon_get_pixmap_private(back_priv->pixmap);
-	radeon_set_pixmap_private(front_priv->pixmap, back_pix);
-	radeon_set_pixmap_private(back_priv->pixmap, front_pix);
-
-	radeon_glamor_exchange_buffers(front_priv->pixmap, back_priv->pixmap);
-    } else
-#endif
-    {
-	struct radeon_exa_pixmap_priv driver_priv = *(struct radeon_exa_pixmap_priv*)
-	    exaGetPixmapDriverPrivate(front_priv->pixmap);
-
-	*(struct radeon_exa_pixmap_priv*)exaGetPixmapDriverPrivate(front_priv->pixmap) =
-	    *(struct radeon_exa_pixmap_priv*)exaGetPixmapDriverPrivate(back_priv->pixmap);
-	*(struct radeon_exa_pixmap_priv*)exaGetPixmapDriverPrivate(back_priv->pixmap) =
-	    driver_priv;
+    /* Do we need to update the Screen? */
+    screen = draw->pScreen;
+    info = RADEONPTR(xf86ScreenToScrn(screen));
+    if (front_bo == info->front_bo) {
+	radeon_bo_ref(back_bo);
+	radeon_bo_unref(info->front_bo);
+	info->front_bo = back_bo;
+	radeon_set_pixmap_bo(screen->GetScreenPixmap(screen), back_bo);
     }
+
+    radeon_glamor_exchange_buffers(front_priv->pixmap, back_priv->pixmap);
 
     DamageRegionProcessPending(&front_priv->pixmap->drawable);
 }
@@ -929,7 +941,7 @@ static int radeon_dri2_get_msc(DrawablePtr draw, CARD64 *ust, CARD64 *msc)
     xf86CrtcPtr crtc = radeon_dri2_drawable_crtc(draw, TRUE);
 
     /* Drawable not displayed, make up a value */
-    if (!crtc) {
+    if (crtc == NULL) {
         *ust = 0;
         *msc = 0;
         return TRUE;
@@ -974,45 +986,32 @@ CARD32 radeon_dri2_deferred_event(OsTimerPtr timer, CARD32 now, pointer data)
 
     scrn = crtc->scrn;
     pRADEONEnt = RADEONEntPriv(scrn);
-    drmmode_crtc = event_info->crtc->driver_private;
     ret = drmmode_get_current_ust(pRADEONEnt->fd, &drm_now);
     if (ret) {
 	xf86DrvMsg(scrn->scrnIndex, X_ERROR,
 		   "%s cannot get current time\n", __func__);
-
-	if (event_info->drm_queue_seq) {
-	    drmmode_crtc->drmmode->event_context.
-		vblank_handler(pRADEONEnt->fd, 0, 0, 0,
-			       (void*)event_info->drm_queue_seq);
-	    drmmode_crtc->wait_flip_nesting_level++;
-	    radeon_drm_queue_handle_deferred(crtc);
-
-	} else {
+	if (event_info->drm_queue_seq)
+	    radeon_drm_queue_handler(pRADEONEnt->fd, 0, 0, 0,
+				     (void*)event_info->drm_queue_seq);
+	else
 	    radeon_dri2_frame_event_handler(crtc, 0, 0, data);
-	}
-
 	return 0;
     }
     /*
      * calculate the frame number from current time
      * that would come from CRTC if it were running
      */
+    drmmode_crtc = event_info->crtc->driver_private;
     delta_t = drm_now - (CARD64)drmmode_crtc->dpms_last_ust;
     delta_seq = delta_t * drmmode_crtc->dpms_last_fps;
     delta_seq /= 1000000;
     frame = (CARD64)drmmode_crtc->dpms_last_seq + delta_seq;
-
-    if (event_info->drm_queue_seq) {
-	drmmode_crtc->drmmode->event_context.
-	    vblank_handler(pRADEONEnt->fd, frame, drm_now / 1000000,
-			   drm_now % 1000000,
-			   (void*)event_info->drm_queue_seq);
-	drmmode_crtc->wait_flip_nesting_level++;
-	radeon_drm_queue_handle_deferred(crtc);
-    } else {
+    if (event_info->drm_queue_seq)
+	radeon_drm_queue_handler(pRADEONEnt->fd, frame, drm_now / 1000000,
+				 drm_now % 1000000,
+				 (void*)event_info->drm_queue_seq);
+    else
 	radeon_dri2_frame_event_handler(crtc, frame, drm_now, data);
-    }
-
     return 0;
 }
 
@@ -1053,7 +1052,7 @@ static int radeon_dri2_schedule_wait_msc(ClientPtr client, DrawablePtr draw,
     remainder &= 0xffffffff;
 
     /* Drawable not visible, return immediately */
-    if (!crtc)
+    if (crtc == NULL)
         goto out_complete;
 
     msc_delta = radeon_get_msc_delta(draw, crtc);
@@ -1093,7 +1092,7 @@ static int radeon_dri2_schedule_wait_msc(ClientPtr client, DrawablePtr draw,
 
     drm_queue_seq = radeon_drm_queue_alloc(crtc, client, RADEON_DRM_QUEUE_ID_DEFAULT,
 					   wait_info, radeon_dri2_frame_event_handler,
-					   radeon_dri2_frame_event_abort, FALSE);
+					   radeon_dri2_frame_event_abort);
     if (drm_queue_seq == RADEON_DRM_QUEUE_ERROR) {
         xf86DrvMsg(scrn->scrnIndex, X_WARNING,
 		   "Allocating DRM queue event entry failed.\n");
@@ -1212,7 +1211,7 @@ static int radeon_dri2_schedule_swap(ClientPtr client, DrawablePtr draw,
     radeon_dri2_ref_buffer(back);
 
     /* either off-screen or CRTC not usable... just complete the swap */
-    if (!crtc)
+    if (crtc == NULL)
         goto blit_fallback;
 
     msc_delta = radeon_get_msc_delta(draw, crtc);
@@ -1232,7 +1231,7 @@ static int radeon_dri2_schedule_swap(ClientPtr client, DrawablePtr draw,
 
     drm_queue_seq = radeon_drm_queue_alloc(crtc, client, RADEON_DRM_QUEUE_ID_DEFAULT,
 					   swap_info, radeon_dri2_frame_event_handler,
-					   radeon_dri2_frame_event_abort, FALSE);
+					   radeon_dri2_frame_event_abort);
     if (drm_queue_seq == RADEON_DRM_QUEUE_ERROR) {
         xf86DrvMsg(scrn->scrnIndex, X_WARNING,
 		   "Allocating DRM queue entry failed.\n");
