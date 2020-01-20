@@ -12,7 +12,7 @@
 
 Summary:   Xorg X11 ati video driver
 Name:      xorg-x11-drv-ati
-Version:   18.0.1
+Version:   18.1.0
 Release:   1%{?gver}%{?dist}
 URL:       http://www.x.org
 License:   MIT
@@ -36,6 +36,7 @@ BuildRequires: automake autoconf libtool pkgconfig
 BuildRequires: xorg-x11-util-macros >= 1.17-3
 BuildRequires: systemd-devel
 BuildRequires: xorg-x11-glamor-devel
+BuildRequires: mesa-libgbm-devel
 
 Requires: Xorg %(xserver-sdk-abi-requires ansic)
 Requires: Xorg %(xserver-sdk-abi-requires videodrv)
@@ -74,6 +75,9 @@ rm -rf $RPM_BUILD_ROOT%{moduledir}/multimedia/
 %{_mandir}/man4/radeon.4*
 
 %changelog
+* Thu Nov 22 2018 Dave Airlie <airlied@redhat.com> - 18.1.0-1
+- ati 18.1.0 fix some regressions with new X server (#1648116)
+
 * Wed May 30 2018 Adam Jackson <ajax@redhat.com> - 18.0.1-1
 - ati 18.0.1
 
